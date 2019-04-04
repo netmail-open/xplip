@@ -1,0 +1,619 @@
+#ifndef XPLIP_H
+#define XPLIP_H
+
+/*
+	Platform defines
+
+	The use of these should be limited as much as possible.  Specific tests for
+	features of the platform are prefered.
+*/
+#ifndef LINUX
+#cmakedefine LINUX					1
+#endif
+
+#ifndef WIN32
+#cmakedefine WIN32					1
+#endif
+#ifndef WINDOWS
+#cmakedefine WINDOWS				1
+
+#endif
+
+
+#ifndef MACOSX
+#cmakedefine MACOSX					1
+#endif
+#ifndef DARWIN
+#cmakedefine DARWIN					1
+#endif
+#ifndef APPLE
+#cmakedefine APPLE					1
+#endif
+
+#cmakedefine DEBUG					1
+
+#ifdef WINDOWS
+# define		WIN_CDECL		__cdecl
+# define		WIN_STDCALL		__stdcall
+# define		EXPORT			__declspec(dllexport)
+# define		IMPORT			__declspec(dllimport)
+# define		INLINE			__inline
+#else
+# define		WIN_CDECL
+# define		WIN_STDCALL
+# define		EXPORT
+# define		IMPORT
+# define		INLINE			__inline
+#endif
+
+
+#include <xpltypes.h>
+#include <xpllock.h>
+#include <xplmem.h>
+#include <xplstr.h>
+
+#if defined(WIN32)
+#define sa_family_t	ADDRESS_FAMILY
+
+#if  (__WATCOMC__ >= 1280)
+#include <iphlpapi.h>
+#define IP_PER_ADAPTER_INFO IP_PER_ADAPTER_INFO_W2KSP1
+#endif
+
+typedef int socklen_t;
+
+#ifndef in_addr_t
+typedef unsigned int in_addr_t;
+#endif
+
+#endif
+
+#define XPL_BASE_DIR "/opt/xplip"
+
+
+/* Packing/Byte order */
+#if defined(LINUX)
+# define Xpl8BitPackedStructure     __attribute__ ((aligned(1)))
+# define Xpl64BitPackedStructure    __attribute__ ((aligned(8)))
+#elif defined(MACOSX)
+/* OS X appears to ignore packed */
+# define Xpl8BitPackedStructure     __attribute__ ((aligned(1)))
+# define Xpl64BitPackedStructure    __attribute__ ((aligned(8)))
+#elif defined(WIN32)
+# define Xpl8BitPackedStructure
+# define Xpl64BitPackedStructure
+#elif defined(NETWARE) || defined(LIBC)
+# define Xpl8BitPackedStructure
+# define Xpl64BitPackedStructure
+#else
+# error "Packing not defined on this platform"
+#endif
+
+//#define IPv6_SUPPORT
+//define DEBUG_DNS
+//#define DEBUG_SEARCH	1
+
+#if !defined(XPL_SOCKET_ERROR)
+#define XPL_SOCKET_ERROR (-1)
+#endif
+
+#if !defined(XPL_SOCKET_INVALID)
+#define XPL_SOCKET_INVALID (XplSocket)XPL_SOCKET_ERROR
+#endif
+
+
+
+
+#if defined(LINUX) || defined(S390RH) || defined(SOLARIS) || defined(MACOSX)
+
+#include <unistd.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <resolv.h>
+#include <netdb.h>
+#include <sys/stat.h>
+#include <xpltypes.h>
+#include <ctype.h>
+
+
+#include <xplsockaddr.h>
+
+typedef int XplSocket;
+
+#define DebugAssert( arg )
+#define DebugPrintf printf
+#define XplConsolePrintf printf
+
+#define XplInitWinSock()
+#define XplWinIpCleanup()
+#define XplIpSocket(d, t, p)                socket((d), (t), (p))
+#define XplIpAccept(s, a, l)                accept((s), (a), (l))
+#define XplIpListen(s, b)                   listen((s), (b))
+#define XplIpBind(s, a, l)                  bind((s), (a), (l))
+#define XplIpConnect(s, a, l)               connect((s), (a), (l))
+#define XplIpRecv(s, b, l, f)               recv((s), (b), (l), (f))
+#ifdef MSG_NOSIGNAL
+#define XplIpSend(s, b, l, f)               send((s), (b), (l), (f) | MSG_NOSIGNAL)
+#else
+#define XplIpSend(s, b, l, f)               send((s), (b), (l), (f))
+#endif
+#define XplIpReceiveFrom( s, b, l, g, m, n ) recvfrom( ( s ), ( b ), ( l ), ( g ), ( m ), ( n ) )
+#ifdef MSG_NOSIGNAL
+#define XplIpSendTo(s, b, l, f, t, z)       sendto((s), (b), (l), (f) | MSG_NOSIGNAL, (t), (z))
+#else
+#define XplIpSendTo(s, b, l, f, t, z)       sendto((s), (b), (l), (f), (t), (z))
+#endif
+#define XplIpClose(s)                       close((s))
+#define XplIpShutdown(s, h)                 shutdown((s), (h))
+#define XplIpGetSockName(s, a, l)           getsockname((s), (a), (l))
+#define XplIpGetPeerName(s, a, l)           getpeername((s), (a), (l))
+/* NOTE: added delay to keep computer responsive */
+#define XplIpSelect(n, r, w, e, t)          select((n), (r), (w), (e), (t)); // XplDelay(10);
+#define XplIpSetSockOption(s, o, v, p, l)   setsockopt((s), (o), (v), (p), (l))
+
+#define ConnSockOpt(c, o, v, p, l)          setsockopt((c)->socket, (o), (v), (p), (l))
+
+
+#if !defined(ECONNABORTED)
+#define ECONNABORTED 130
+#endif
+
+#elif defined(LIBC) || defined(NETWARE) || defined(WIN32)
+
+typedef SOCKET XplSocket;
+
+
+#define XplInitWinSock() 												\
+{																		\
+	int		r; 															\
+	WSADATA	data;														\
+	WORD	requesting = MAKEWORD(2, 2);								\
+																		\
+	if (0 == (r = WSAStartup(requesting, &data))) {						\
+		do {															\
+			if (LOBYTE(data.wVersion) == LOBYTE(requesting)) {			\
+				if (HIBYTE(data.wVersion) >= HIBYTE(requesting)) {		\
+					break;												\
+				}														\
+			} else if (LOBYTE(data.wVersion) > LOBYTE(requesting)) {	\
+				break;													\
+			}															\
+			XplConsolePrintf("XPL: Failed to load a compatible Windows" \
+				" sockets library; available version is %d.%d.\r\n",	\
+				LOBYTE(data.wVersion), HIBYTE(data.wVersion));			\
+		} while (FALSE);												\
+	} else {															\
+		XplConsolePrintf("XPL: Failed to initialize the Windows "		\
+			" sockets library; error %d.\r\n", r);						\
+	}																	\
+}
+
+#if defined(WIN32)
+
+#ifndef WSA_FLAG_NO_HANDLE_INHERIT
+#define WSA_FLAG_NO_HANDLE_INHERIT 0x80
+#endif
+
+
+__inline static int win32_socket( int af, int type, int protocol )
+{
+	int ret;
+
+	// ret = socket( af, type, protocol );
+	ret = WSASocket( af, type, protocol, NULL, 0,
+		WSA_FLAG_NO_HANDLE_INHERIT | WSA_FLAG_OVERLAPPED );
+	if( INVALID_SOCKET == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_bind( SOCKET s, const struct sockaddr *name, int namelen )
+{
+	int ret;
+
+	ret = bind( s, name, namelen );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_listen( SOCKET s, int backlog )
+{
+	int ret;
+
+	ret = listen( s, backlog );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_accept( SOCKET s, struct sockaddr *addr, int *addrlen )
+{
+	int ret;
+
+	ret = accept( s, addr, addrlen );
+	if( INVALID_SOCKET == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_connect( SOCKET s, const struct sockaddr *name, int namelen )
+{
+	int ret;
+
+	ret = connect( s, name, namelen );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_shutdown( SOCKET s, int how )
+{
+	int ret;
+
+	ret = shutdown( s, how );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_closesocket( SOCKET s )
+{
+	int ret;
+
+	ret = closesocket( s );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_send( SOCKET s, const char *buf, int len, int flags )
+{
+	int ret;
+
+	ret = send( s, buf, len, flags );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_sendto( SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen )
+{
+	int ret;
+
+	ret = sendto( s, buf, len, flags, to, tolen );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_recv( SOCKET s, char *buf, int len, int flags )
+{
+	int ret;
+
+	ret = recv( s, buf, len, flags );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_recvfrom( SOCKET s, char *buf, int len, int flags, struct sockaddr *from, int *fromlen )
+{
+	int ret;
+
+	ret = recvfrom( s, buf, len, flags, from, fromlen );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_select( int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timeval *timeout )
+{
+	int ret;
+
+	ret = select( nfds, readfds, writefds, exceptfds, timeout );
+	if( SOCKET_ERROR == ret) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_getsockname( SOCKET s, struct sockaddr *name, int *namelen )
+{
+	int ret;
+
+	ret = getsockname( s, name, namelen );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_getpeername( SOCKET s, struct sockaddr *name, int *namelen )
+{
+	int ret;
+
+	ret = getpeername( s, name, namelen );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_setsockopt( SOCKET s, int level, int optname, const char *optval, int optlen )
+{
+	int ret;
+
+	ret = setsockopt( s, level, optname, optval, optlen );
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+__inline static int win32_WSACleanup( void )
+{
+	int ret;
+
+	ret = WSACleanup();
+	if( SOCKET_ERROR == ret ) {
+		errno = XplTranslateError(WSAGetLastError());
+	}
+	return ret;
+}
+
+#define XplIpSocket(af, type, protocol)        win32_socket(af, type, protocol)
+#define XplIpBind(sock, addr, addrlen)         win32_bind(sock, addr, addrlen)
+#define XplIpListen(sock, backlog)             win32_listen(sock, backlog)
+#define XplIpAccept(s, addr, addrlen)          win32_accept(s, addr, addrlen)
+#define XplIpConnect(sock, addr, addrlen)      win32_connect(sock, addr, addrlen)
+#define XplIpShutdown(s, how)                  win32_shutdown(s, how)
+#define XplIpClose(sock)                       win32_closesocket(sock)
+#define XplIpSend(sock, buf, len, flags)       win32_send(sock, buf, len, flags)
+#define XplIpSendTo(s, b, l, f, t, z)          win32_sendto((s), (b), (l), (f), (t), (z))
+#define XplIpRecv(sock, buf, len, flags)       win32_recv(sock, buf, len, flags)
+#define XplIpReceiveFrom( s, b, l, g, m, n )   win32_recvfrom( ( s ), ( b ), ( l ), ( g ), ( m ), ( n ) )
+#define XplIpSelect(nfds, rfds, wfds, efds, t) win32_select(nfds, rfds, wfds, efds, t)
+#define XplIpGetSockName(s, addr, addrlen)     win32_getsockname(s, addr, addrlen)
+#define XplIpGetPeerName(s, addr, addrlen)     win32_getpeername(s, addr, addrlen)
+#define XplIpSetSockOption(s, o, v, p, l)      win32_setsockopt((s), (o), (v), (p), (l))
+#define XplWinIpCleanup()                      win32_WSACleanup();
+
+#else
+
+#define XplIpSocket(af, type, protocol)        socket(af, type, protocol)
+#define XplIpBind(sock, addr, addrlen)         bind(sock, addr, addrlen)
+#define XplIpListen(sock, backlog)             listen(sock, backlog)
+#define XplIpAccept(s, addr, addrlen)          accept(s, addr, addrlen)
+#define XplIpConnect(sock, addr, addrlen)      connect(sock, addr, addrlen)
+#define XplIpShutdown(s, how)                  shutdown(s, how)
+#define XplIpClose(sock)                       closesocket(sock)
+#define XplIpSend(sock, buf, len, flags)       send(sock, buf, len, flags)
+#define XplIpSendTo(s, b, l, f, t, z)          sendto((s), (b), (l), (f), (t), (z))
+#define XplIpRecv(sock, buf, len, flags)       recv(sock, buf, len, flags)
+#define XplIpReceiveFrom( s, b, l, g, m, n )   recvfrom( ( s ), ( b ), ( l ), ( g ), ( m ), ( n ) )
+#define XplIpSelect(nfds, rfds, wfds, efds, t) select(nfds, rfds, wfds, efds, t)
+#define XplIpGetSockName(s, addr, addrlen)     getsockname(s, addr, addrlen)
+#define XplIpGetPeerName(s, addr, addrlen)     getpeername(s, addr, addrlen)
+#define XplIpSetSockOption(s, o, v, p, l)      setsockopt((s), (o), (v), (p), (l))
+#define XplWinIpCleanup()
+
+#endif
+
+#else
+#error Connection management library not implemented on this platform.
+#endif
+
+#define CHOP_NEWLINE(s)				\
+{									\
+	char	*p;						\
+									\
+	if ((p = strchr((s), 0x0A))) {	\
+		*p = '\0';					\
+	}								\
+	if ((p = strchr((s), 0x0D))) {	\
+		*p = '\0';					\
+	}								\
+}
+
+#if XPL_LITTLE_ENDIAN
+#define AddressCast(address) ((address) & 0x000000FF), (((address) & 0x0000FF00) >> 8), (((address) & 0x00FF0000) >> 16), (((address) & 0xFF000000) >> 24)
+#else
+#define AddressCast(address) (((address) & 0xFF000000) >> 24), (((address) & 0x00FF0000) >> 16), (((address) & 0x0000FF00) >> 8), ((address) & 0x000000FF)
+#endif
+
+
+
+typedef enum {
+	XPL_SOCKET_MODE_BLOCKING = 0,
+	XPL_SOCKET_MODE_NON_BLOCKING,
+	XPL_SOCKET_MODE_DISABLE_NAGLE
+} XplSocketMode;
+
+typedef struct XplInterface {
+	struct sockaddr_storage *sa;
+	socklen_t	salen; // use family?
+	unsigned char macAddr[6];
+
+	struct XplInterface *next;
+} XplInterface;
+
+EXPORT XplInterface *XplGetInterfaceList(void);
+#if defined(WIN32)
+EXPORT XplInterface *XplGetAdapterList(void);
+#endif
+EXPORT int XplFreeInterfaceList(struct XplInterface * );
+EXPORT int XplIpInit(void);
+EXPORT int XplIpCleanup(void);
+
+EXPORT int XplSocketSetMode( XplSocket sock, XplSocketMode mode);
+
+EXPORT int XplIpRead(XplSocket sock,  char *buf, int len, unsigned long timeout);  // timeout is in milliseconds
+EXPORT int XplIpReadFrom(XplSocket socket, char *buf, int len, int flags, struct sockaddr *from, socklen_t *fromlen, unsigned long timeout );
+
+EXPORT int XplGetHostMachineID(char *buf, size_t buflen);
+EXPORT XplBool XplIPSockAddrSetPort( struct sockaddr *sa, uint16 port );
+EXPORT uint16 XplIPSockAddrGetPort( struct sockaddr *sa );
+EXPORT void XplGetHostIPAddress(sa_family_t sa_family, struct sockaddr_storage *sa);
+EXPORT XplBool XplIsLoopbackAddress( struct sockaddr *sa );
+
+EXPORT XplBool XplIsLocalSockaddr(struct sockaddr *saddr);
+
+// todo: ipv6 version
+EXPORT XplBool XplIsLocalIPAddress(unsigned long address);
+
+/*
+	DNS
+*/
+
+#define ANSWER_STATE_ACTIVE   0
+#define ANSWER_STATE_FREE     1
+
+typedef enum {
+    DNS_SUCCESS                 = 0,
+    DNS_AUTHORITATIVE_SUCCESS   = 1,
+    DNS_FAILURE                 = -1,
+    DNS_AUTHORITATIVE_FAILURE   = -2
+} DNSLookupResult;
+
+typedef enum {
+	 DNS_TYPE_NONE  = 0,
+	 DNS_TYPE_A     = 1,
+	 DNS_TYPE_NS    = 2,
+	 DNS_TYPE_MD    = 3,
+	 DNS_TYPE_MF    = 4,
+	 DNS_TYPE_CNAME = 5,
+	 DNS_TYPE_SOA   = 6,
+	 DNS_TYPE_MB    = 7,
+	 DNS_TYPE_MG    = 8,
+	 DNS_TYPE_MR    = 9,
+	 DNS_TYPE_NULL  = 10,
+	 DNS_TYPE_WKS   = 11,
+	 DNS_TYPE_PTR   = 12,
+	 DNS_TYPE_HINFO = 13,
+	 DNS_TYPE_MINFO = 14,
+	 DNS_TYPE_MX    = 15,
+	 DNS_TYPE_TXT   = 16,
+	 DNS_TYPE_AAAA	= 28,
+	 DNS_TYPE_SPF   = 99
+} DNSQueryType;
+
+typedef enum
+{
+	DNS_ADDRESS,
+	DNS_NAME,
+}DNSAnswerType;
+
+typedef struct DNSAnswer {
+	struct DNSAnswer	*next;
+	XplAtomic			useCount;
+	unsigned long		state;
+	DNSAnswerType		type;
+	unsigned short		mx_prio;	// MX records only
+	union
+	{
+		union
+		{
+			struct sockaddr		*sa;
+			struct sockaddr_in	*sin;
+			struct sockaddr_in6	*sin6;
+		};
+		char			*name;
+	};
+	char				data[];
+} DNSAnswer;
+
+
+
+// todo: change default to use the family(s) that we have bound.
+EXPORT DNSLookupResult DNSLookup(const char *host, DNSQueryType type, DNSAnswer **answer);
+EXPORT DNSLookupResult DNSLookupA(const char *host, sa_family_t sa_family, struct sockaddr_storage *sa);
+EXPORT DNSLookupResult DNSReverseLookup( XplSockAddr *sa, XplBool confirm, DNSAnswer **answers );
+EXPORT DNSLookupResult DNSRBLLookup( struct sockaddr *sa, const char *zone, DNSAnswer **answers );
+EXPORT DNSLookupResult DNSDBLLookup( const char *host, const char *zone, const char *zoneRBL, DNSAnswer **answers );
+EXPORT XplBool DNSNumericHost( const char *host, sa_family_t sa_family, struct sockaddr_storage *sa );
+
+EXPORT void DNSFreeAnswers(DNSAnswer *answers);
+EXPORT int DNSStart(void);
+EXPORT void DNSStop(void);
+EXPORT int DNSStats(unsigned long *entries, unsigned long *cached, unsigned long *resolved, unsigned long *lookup);
+
+/* Resolve and Recurser */
+EXPORT int AttachRecurser(void);
+EXPORT void DetachRecurser(void);
+
+/*
+   Recurser/NSRL
+*/
+EXPORT int  InitRecurser(int (*sacompar)(const void *, int, const void *));
+EXPORT int  InitRecurserEx(int (*sacompar)(const void *, int, const void *), time_t timeout, size_t cachesize);
+EXPORT void DestroyRecurser(void);
+EXPORT int	SetIface(const char *addr, unsigned short port);
+EXPORT int  AddHints(char *zone, char **ip4addrs, size_t na);
+EXPORT int  DnsSAQuery(char *qname, int type);
+EXPORT int  DnsRQueryPacket(char *qname, int type, char *packetbuf, int *size);
+
+EXPORT int  LoadNSRL(char *hostsafile, char *cidrsafile);
+EXPORT int  UnLoadNSRL(void);
+EXPORT int  SearchNSRL(const void *host, int nd, const void *ip4);
+EXPORT int  StartNSRLUpdate(time_t interval);
+
+/*
+	Store a human readable string in the provided buffer based on the valid in
+	sa.  The format of the string will depend on the address family specified in
+	the sa.
+
+	The number of bytes written will be returned.  If an unsupported address
+	family is found then -1 will be returned.
+*/
+
+EXPORT ssize_t XplIPAddrString(struct sockaddr *sa, char *buffer, size_t bufsize);
+
+/*
+ 	 Same as above, but you can omit port by setting withPort to FALSE
+*/
+EXPORT ssize_t XplIPAddrString_EX(struct sockaddr *sa, char *buffer, size_t bufsize, XplBool withPort);
+
+/*
+	Attempt to convert the provided string into an IP address.
+
+	If *saLen is less than the required size then the required size will be
+	stored in *saLen, a negative value will be returned and errno will be set to
+	ENOSPC.
+
+	On success 0 is returned.
+*/
+#if 0
+// TODO: update interface
+EXPORT int XplStrToIPAddr(char *buffer, struct sockaddr_storage *sa );
+#else
+EXPORT int XplStrToIPAddr(char *buffer, struct sockaddr *sa, socklen_t *saLen);
+#endif
+/*
+	Return the 32 bit value of the provided address.  If the address does not an
+	IPv4 address then 0 is returned, and errno will be set.
+*/
+// todo: get rid of this one
+EXPORT uint32 XplIPv4Addr(struct sockaddr *sa);
+
+/* Return the size of the provided sa based on the family it specifies. */
+EXPORT socklen_t XplIPAddrSize(struct sockaddr *sa);
+
+
+EXPORT int XplIPAddrCmp(struct sockaddr *saA, struct sockaddr *saB, XplBool checkPort);
+
+#endif /* XPLIP_H */
